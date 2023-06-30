@@ -1,11 +1,15 @@
+// Importieren des express-Moduls zur Erstellung der Serveranwendung
 const express = require('express');
+// Erstellung einer neuen Express-Anwendung
 const app = express();
-const sqlite3 = require('sqlite3').verbose();
-const db = new sqlite3.Database('restaurants.db');
+// Importieren des "better-sqlite3"-Moduls zur Verbindung mit SQLite-Datenbanken
+const Database = require('better-sqlite3');
 
-// Aufgabe 3: Tabellenerstellung, falls sie noch nicht existiert
-// Erstellt die Tabelle "restaurants" mit den Spalten id, name, adresse und kategorie, falls sie noch nicht existiert
-db.run(`
+// Erstellung einer neuen Verbindung zur SQLite-Datenbank "restaurants.db"
+const db = new Database('restaurants.db');
+
+// Ausführung einer SQL-Anweisung zur Erstellung einer Tabelle namens "restaurants", wenn sie nicht existiert
+db.exec(`
   CREATE TABLE IF NOT EXISTS restaurants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -14,146 +18,111 @@ db.run(`
   )
 `);
 
-// bodyparser middleware aktivieren
-// Middleware, um JSON-Daten im Request-Body zu verarbeiten
+// Aktivierung der Middleware-Funktion in Express, um JSON-Daten im Anforderungskörper zu verarbeiten
 app.use(express.json());
 
-// true/false, ob restaurant mit name schon vorhanden ist
-
-// Aufgabe 4: true/false, ob restaurant mit name schon vorhanden ist
-// Prüft, ob ein Restaurant mit dem angegebenen Namen bereits in der Datenbank existiert
-function exists(name, callback) {
-  db.get(`SELECT * FROM restaurants WHERE name = ?`, [name], (err, row) => {
-    if (err) {
-      callback(err);
-    } else {
-      callback(null, !!row);
-    }
-  });
+// Funktion zur Überprüfung, ob ein Restaurant mit dem gegebenen Namen bereits in der Datenbank existiert
+function exists(name) {
+  // SQL-Abfrage zur Suche eines Restaurants mit dem gegebenen Namen
+  const row = db.prepare(`SELECT * FROM restaurants WHERE name = ?`).get(name);
+  // Rückgabe, ob das Restaurant existiert (wahr) oder nicht (falsch)
+  return !!row;
 }
 
-// gibt index eines bestimmten restaurants zurück; -1 falls es nicht existiert
-
-// Aufgabe 4: gibt index eines bestimmten restaurants zurück; -1 falls es nicht existiert
-// Sucht den Index (ID) des Restaurants mit dem angegebenen Namen in der Datenbank
-function getIndex(name, callback) {
-  db.get(`SELECT id FROM restaurants WHERE name = ?`, [name], (err, row) => {
-    if (err) {
-      callback(err);
-    } else {
-      callback(null, row ? row.id : -1);
-    }
-  });
+// Funktion zur Rückgabe des Indexes (ID) eines Restaurants mit dem gegebenen Namen in der Datenbank
+function getIndex(name) {
+  // SQL-Abfrage zur Suche der ID eines Restaurants mit dem gegebenen Namen
+  const { id } = db.prepare(`SELECT id FROM restaurants WHERE name = ?`).get(name) || {};
+  // Rückgabe der ID des Restaurants, oder -1 wenn es nicht gefunden wurde
+  return id ?? -1;
 }
 
-// löscht ein restaurant aus der Datenbank
-
-// Aufgabe 4: löscht ein restaurant aus der Datenbank
-// Löscht das Restaurant mit dem angegebenen Namen aus der Datenbank
-function delRestaurant(name, callback) {
-  db.run(`DELETE FROM restaurants WHERE name = ?`, [name], function (err) {
-    if (err) {
-      callback(err);
-    } else {
-      callback(null, this.changes > 0);
-    }
-  });
-}
-
-/* API ENDPUNKTE */
-
-// Aufgabe 6: alle restaurants abfragen
-// GET-Endpunkt, um alle Restaurants aus der Datenbank abzurufen
+// API-Endpunkt zur Rückgabe aller Restaurants in der Datenbank
 app.get('/restaurants', (_, res) => {
-  db.all(`SELECT * FROM restaurants`, [], (err, rows) => {
-    if (err) {
-      res.status(500).send("Fehler beim Abrufen der Restaurants aus der Datenbank.");
-    } else {
-      res.send(rows);
-    }
-  });
+  // SQL-Abfrage zur Rückgabe aller Restaurants
+  const rows = db.prepare(`SELECT * FROM restaurants`).all();
+  // Senden der abgerufenen Restaurants als Antwort
+  res.send(rows);
 });
 
-// Aufgabe 6: bestimmtes restaurant abfragen
-// GET-Endpunkt, um ein bestimmtes Restaurant anhand des Namens abzurufen
+// API-Endpunkt zur Rückgabe eines bestimmten Restaurants, das durch seinen Namen identifiziert wird
 app.get('/restaurant/:name', (req, res) => {
-  db.get(`SELECT * FROM restaurants WHERE name = ?`, [req.params.name], (err, row) => {
-    if (err) {
-      res.status(500).send("Fehler beim Abrufen des Restaurants aus der Datenbank.");
-    } else if (row) {
-      res.send(row);
-    } else {
-      res.status(404).send("Dieses Restaurant existiert nicht");
-    }
-  });
-});
-
-// Aufgabe 5: neues restaurant hinzufügen
-// POST-Endpunkt, um ein neues Restaurant zur Datenbank hinzuzufügen
-app.post('/restaurant', (req, res) => {
-  const r = req.body;
-  if (!r.name || !r.adresse || !r.kategorie) {
-    res.status(400).send("Objekt ist nicht vollständig! Name, Adresse oder Kategorie fehlt!");
+  // SQL-Abfrage zur Suche eines Restaurants mit dem gegebenen Namen
+  const row = db.prepare(`SELECT * FROM restaurants WHERE name = ?`).get(req.params.name);
+  // Wenn das Restaurant gefunden wurde, wird es als Antwort gesendet
+  if (row) {
+    res.send(row);
+  // Wenn es nicht gefunden wurde, wird eine 404-Fehlermeldung gesendet
   } else {
-    exists(r.name, (err, isExisting) => {
-      if (err) {
-        res.status(500).send("Fehler beim Überprüfen des Restaurants in der Datenbank.");
-      } else if (!isExisting) {
-        db.run(`INSERT INTO restaurants (name, adresse, kategorie) VALUES (?, ?, ?)`, [r.name, r.adresse, r.kategorie], function (err) {
-          if (err) {
-            res.status(500).send("Fehler beim Hinzufügen des Restaurants in die Datenbank.");
-          } else {
-            res.status(201).send("Restaurant wurde hinzugefügt");
-          }
-        });
-      } else {
-        res.status(409).send("Restaurant ist bereits gespeichert!");
-      }
-    });
+    res.status(404).send("Dieses Restaurant existiert nicht");
   }
 });
 
-// Aufgabe 8: bestimmtes restaurant aktualisieren
-// PUT-Endpunkt, um ein bestimmtes Restaurant in der Datenbank zu aktualisieren
+// API-Endpunkt zur Hinzufügung eines neuen Restaurants zur Datenbank
+app.post('/restaurant', (req, res) => {
+  const r = req.body;
+  // Überprüfung, ob alle benötigten Informationen vorhanden sind
+  if (!r.name || !r.adresse || !r.kategorie) {
+    // Wenn Informationen fehlen, wird eine 400-Fehlermeldung gesendet
+    res.status(400).send("Objekt ist nicht vollständig! Name, Adresse oder Kategorie fehlt!");
+  // Überprüfung, ob das Restaurant bereits existiert
+  } else if (!exists(r.name)) {
+    // Wenn das Restaurant nicht existiert, wird es zur Datenbank hinzugefügt
+    db.prepare(`INSERT INTO restaurants (name, adresse, kategorie) VALUES (?, ?, ?)`).run(r.name, r.adresse, r.kategorie);
+    res.status(201).send("Restaurant wurde hinzugefügt");
+  // Wenn das Restaurant bereits existiert, wird eine 409-Fehlermeldung gesendet
+  } else {
+    res.status(409).send("Restaurant ist bereits gespeichert!");
+  }
+});
+
+// API-Endpunkt zur Aktualisierung eines bestimmten Restaurants in der Datenbank, das durch seinen Namen identifiziert wird
 app.put('/restaurant/:name', (req, res) => {
-  getIndex(req.params.name, (err, index) => {
-    if (err) {
-      res.status(500).send("Fehler beim Überprüfen des Restaurants in der Datenbank.");
-    } else if (index !== -1) {
-      const r = req.body;
-      if (r.name && r.adresse && r.kategorie) {
-        db.run(`UPDATE restaurants SET name = ?, adresse = ?, kategorie = ? WHERE id = ?`, [r.name, r.adresse, r.kategorie, index], function (err) {
-          if (err) {
-            res.status(500).send("Fehler beim Aktualisieren des Restaurants in der Datenbank.");
-          } else {
-            res.send(r);
-            console.log(`Aktualisiere: ${req.params.name}: ${r.name}, ${r.adresse}, ${r.kategorie}.`);
-          }
-        });
-      } else {
-        res.status(400).send("Daten unvollständig, nicht aktualisiert.");
-      }
+  const r = req.body;
+  // Überprüfung, ob alle benötigten Informationen vorhanden sind
+  if (r.name && r.adresse && r.kategorie) {
+    // Wenn alle Informationen vorhanden sind, wird das Restaurant aktualisiert
+    const id = getIndex(req.params.name);
+    // Wenn das Restaurant existiert, wird es aktualisiert
+    if (id !== -1) {
+      db.prepare(`UPDATE restaurants SET name = ?, adresse = ?, kategorie = ? WHERE id = ?`).run(r.name, r.adresse, r.kategorie, id);
+      res.send("Restaurant wurde aktualisiert");
+    // Wenn das Restaurant nicht existiert, wird eine 404-Fehlermeldung gesendet
     } else {
       res.status(404).send("Restaurant nicht gefunden.");
     }
-  });
+  // Wenn Informationen fehlen, wird eine 400-Fehlermeldung gesendet
+  } else {
+    res.status(400).send("Daten unvollständig, nicht aktualisiert.");
+  }
 });
 
-// Aufgabe 7: bestimmtes restaurant löschen
-// DELETE-Endpunkt, um ein bestimmtes Restaurant aus der Datenbank zu löschen
+// API-Endpunkt zur Löschung eines bestimmten Restaurants aus der Datenbank, das durch seinen Namen identifiziert wird
 app.delete('/restaurant/:name', (req, res) => {
-  delRestaurant(req.params.name, (err, isDeleted) => {
-    if (err) {
-      res.status(500).send("Fehler beim Löschen des Restaurants aus der Datenbank.");
-    } else if (isDeleted) {
-      res.send("Folgendes Restaurant wurde gelöscht: " + req.params.name);
-    } else {
-      res.status(404).send("Restaurant ist nicht vorhanden.");
-    }
-  });
+  const id = getIndex(req.params.name);
+  // Wenn das Restaurant existiert, wird es gelöscht
+  if (id !== -1) {
+    db.prepare(`DELETE FROM restaurants WHERE id = ?`).run(id);
+    res.send("Folgendes Restaurant wurde gelöscht: " + req.params.name);
+  // Wenn das Restaurant nicht existiert, wird eine 404-Fehlermeldung gesendet
+  } else {
+    res.status(404).send("Restaurant ist nicht vorhanden.");
+  }
 });
 
-// server starten
+// Start des Servers, der Anfragen an den Port 3000 entgegennimmt
 app.listen(3000, () => {
   console.log("Server gestartet auf Port 3000");
 });
+
+// --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
+// Alle Punkte der Aufgabenstellung:
+
+// 1. Der Server wurde erstellt und läuft auf Port 3000. (app.listen(3000))
+// 2. Eine SQLite-Datenbank namens "restaurants.db" wurde erstellt und eine Tabelle namens "restaurants" wurde in der Datenbank erstellt, falls sie noch nicht existiert. (new Database('restaurants.db') und db.exec())
+// 3. Es gibt einen Endpunkt, der alle Restaurants aus der Datenbank als JSON-Objekt zurückgibt. (app.get('/restaurants'))
+// 4. Es gibt einen Endpunkt, der ein bestimmtes Restaurant anhand seines Namens aus der Datenbank zurückgibt. (app.get('/restaurant/:name'))
+// 5. Es gibt einen Endpunkt, der es ermöglicht, ein neues Restaurant zur Datenbank hinzuzufügen. (app.post('/restaurant'))
+// 6. Es gibt einen Endpunkt, der es ermöglicht, die Daten eines bestimmten Restaurants zu aktualisieren. (app.put('/restaurant/:name'))
+// 7. Es gibt einen Endpunkt, der es ermöglicht, ein bestimmtes Restaurant aus der Datenbank zu löschen. (app.delete('/restaurant/:name'))
+// 8. Bevor ein neues Restaurant hinzugefügt wird, wird geprüft, ob es bereits existiert, und es wird ein Fehler zurückgegeben, wenn das der Fall ist. (Die Funktion exists() wird innerhalb von app.post('/restaurant') verwendet)
